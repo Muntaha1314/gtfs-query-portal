@@ -91,7 +91,7 @@ LIMIT 20;
 --Busiest stops in morning hours
 --Input needed: start time, end time
 --Output returned: stop_id, stop_name, morning_arrivals, geojson
---Used for: showing the busiest stops during morning hours on the map or in ranking form
+--Used for: 
 
 SELECT
     s.stop_id,
@@ -107,3 +107,154 @@ ORDER BY morning_arrivals DESC
 LIMIT 20;
 
 
+SELECT COUNT(*) FROM stop_vertices;
+SELECT COUNT(*) FROM transit_edges_raw;
+SELECT COUNT(*) FROM transit_edges;
+
+
+SELECT *
+FROM transit_edges
+LIMIT 10;
+
+SELECT vertex_id, stop_id, stop_name
+FROM stop_vertices
+WHERE stop_name ILIKE '%METRO%'
+LIMIT 20;
+
+
+--Dijkstra shortest path stop list
+--Input needed: start_vertex_id, end_vertex_id
+--Output returned: seq, node, stop_id, stop_name, edge, cost, agg_cost
+--Used for: showing the ordered list of stops in the shortest path result
+
+WITH path AS (
+    SELECT *
+    FROM pgr_dijkstra(
+        'SELECT id, source, target, cost FROM transit_edges',
+        565,
+        564,
+        directed := true
+    )
+)
+SELECT
+    p.seq,
+    p.node,
+    sv.stop_id,
+    sv.stop_name,
+    p.edge,
+    p.cost,
+    p.agg_cost
+FROM path p
+LEFT JOIN stop_vertices sv
+    ON p.node = sv.vertex_id
+ORDER BY p.seq;
+
+
+--Dijkstra shortest path geometry
+--Input needed: start_vertex_id, end_vertex_id
+--Output returned: seq, from_stop_id, to_stop_id, cost, edge_geojson
+--Used for: displaying the shortest path on the map as connected route segments
+
+WITH path AS (
+    SELECT *
+    FROM pgr_dijkstra(
+        'SELECT id, source, target, cost FROM transit_edges',
+        565,
+        564,
+        directed := true
+    )
+)
+SELECT
+    p.seq,
+    e.from_stop_id,
+    e.to_stop_id,
+    e.cost,
+    ST_AsGeoJSON(e.geom) AS edge_geojson
+FROM path p
+JOIN transit_edges e
+    ON p.edge = e.id
+ORDER BY p.seq;
+
+--A* shortest path stop list
+--Input needed: start_vertex_id, end_vertex_id
+--Output returned: seq, node, stop_id, stop_name, edge, cost, agg_cost
+--Used for: showing the ordered list of stops in the shortest path result using the A* algorithm
+
+WITH path AS (
+    SELECT *
+    FROM pgr_astar(
+        'SELECT id, source, target, cost, x1, y1, x2, y2 FROM transit_edges',
+        565,
+        564,
+        directed := true
+    )
+)
+SELECT
+    p.seq,
+    p.node,
+    sv.stop_id,
+    sv.stop_name,
+    p.edge,
+    p.cost,
+    p.agg_cost
+FROM path p
+LEFT JOIN stop_vertices sv
+    ON p.node = sv.vertex_id
+ORDER BY p.seq;
+
+
+--A* shortest path geometry
+--Input needed: start_vertex_id, end_vertex_id
+--Output returned: seq, from_stop_id, to_stop_id, cost, edge_geojson
+--Used for: displaying the A* shortest path on the map as connected route segments
+
+WITH path AS (
+    SELECT *
+    FROM pgr_astar(
+        'SELECT id, source, target, cost, x1, y1, x2, y2 FROM transit_edges',
+        565,
+        564,
+        directed := true
+    )
+)
+SELECT
+    p.seq,
+    e.from_stop_id,
+    e.to_stop_id,
+    e.cost,
+    ST_AsGeoJSON(e.geom) AS edge_geojson
+FROM path p
+JOIN transit_edges e
+    ON p.edge = e.id
+ORDER BY p.seq;
+
+
+
+
+WITH path AS (
+    SELECT *
+    FROM pgr_dijkstra(
+        'SELECT id, source, target, cost FROM transit_edges',
+        565,
+        564,
+        directed := true
+    )
+)
+SELECT
+    COUNT(*) AS step_count,
+    MAX(agg_cost) AS total_cost
+FROM path;
+
+WITH path AS (
+    SELECT *
+    FROM pgr_astar(
+        'SELECT id, source, target, cost, x1, y1, x2, y2 FROM transit_edges',
+        565,
+        564,
+        directed := true
+    )
+)
+SELECT
+    COUNT(*) AS step_count,
+    MAX(agg_cost) AS total_cost
+FROM path;

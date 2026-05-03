@@ -19,3 +19,10 @@ FROM shapes
 GROUP BY shape_id;
 
 ------
+CREATE OR REPLACE FUNCTION gtfs_time_to_seconds(t text)
+RETURNS integer AS $$
+SELECT
+    split_part(t, ':', 1)::int * 3600 +
+    split_part(t, ':', 2)::int * 60 +
+    split_part(t, ':', 3)::int
+$$ LANGUAGE sql IMMUTABLE;

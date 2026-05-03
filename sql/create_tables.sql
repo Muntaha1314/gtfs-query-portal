@@ -89,3 +89,70 @@ CREATE TABLE stop_times (
 
 
 -----
+DROP TABLE IF EXISTS stop_vertices;
+
+CREATE TABLE stop_vertices AS
+SELECT
+    row_number() OVER (ORDER BY stop_id) AS vertex_id,
+    stop_id,
+    stop_name,
+    geom
+FROM stops;
+
+ALTER TABLE stop_vertices
+ADD PRIMARY KEY (vertex_id);
+
+CREATE UNIQUE INDEX stop_vertices_stop_id_idx ON stop_vertices(stop_id);
+CREATE INDEX stop_vertices_geom_gix ON stop_vertices USING GIST (geom);
+
+
+
+DROP TABLE IF EXISTS transit_edges_raw;
+
+CREATE TABLE transit_edges_raw AS
+SELECT
+    st1.trip_id,
+    st1.stop_id AS from_stop_id,
+    st2.stop_id AS to_stop_id,
+    st1.stop_sequence AS from_seq,
+    st2.stop_sequence AS to_seq,
+    GREATEST(
+        gtfs_time_to_seconds(st2.arrival_time) -
+        gtfs_time_to_seconds(st1.departure_time),
+        1
+    ) AS travel_seconds
+FROM stop_times st1
+JOIN stop_times st2
+  ON st1.trip_id = st2.trip_id
+ AND st2.stop_sequence = st1.stop_sequence + 1
+WHERE st1.stop_id <> st2.stop_id;
+
+
+
+DROP TABLE IF EXISTS transit_edges;
+
+CREATE TABLE transit_edges AS
+SELECT
+    row_number() OVER () AS id,
+    v1.vertex_id AS source,
+    v2.vertex_id AS target,
+    r.from_stop_id,
+    r.to_stop_id,
+    AVG(r.travel_seconds)::double precision AS cost,
+    ST_MakeLine(s1.geom, s2.geom)::geometry(LineString, 4326) AS geom,
+    ST_X(s1.geom) AS x1,
+    ST_Y(s1.geom) AS y1,
+    ST_X(s2.geom) AS x2,
+    ST_Y(s2.geom) AS y2
+FROM transit_edges_raw r
+JOIN stop_vertices v1 ON r.from_stop_id = v1.stop_id
+JOIN stop_vertices v2 ON r.to_stop_id = v2.stop_id
+JOIN stops s1 ON r.from_stop_id = s1.stop_id
+JOIN stops s2 ON r.to_stop_id = s2.stop_id
+GROUP BY
+    v1.vertex_id, v2.vertex_id,
+    r.from_stop_id, r.to_stop_id,
+    s1.geom, s2.geom;
+
+ALTER TABLE transit_edges
+ADD PRIMARY KEY (id);
