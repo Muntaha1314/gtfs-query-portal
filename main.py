@@ -9,8 +9,9 @@ done!
 from dotenv import load_dotenv  
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import logging
 import os
@@ -59,8 +60,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GTFS Route Planning API",
     description="Backend of project using GTFS data, PostGIS, and pgRouting",
-    lifespan=lifespan
+    lifespan=lifespan,
+    json_encoders={str: lambda v: v}
 )
+
+# Middleware to ensure UTF-8 encoding in responses
+class UTF8ResponseMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if "application/json" in response.headers.get("content-type", ""):
+            response.headers["content-type"] = "application/json; charset=utf-8"
+        return response
+
+app.add_middleware(UTF8ResponseMiddleware)
 
 
 # Include routers

@@ -111,26 +111,32 @@ def get_stop_by_id(stop_id: str) -> Dict[str, Any]:
     return results[0] if results else {}
 
 
-def get_stops_near(lat: float, lon: float, radius: int = 500) -> List[Dict[str, Any]]:
-    """
-    Retrieve stops within a specified radius (in meters) using PostGIS
-    
-    Args:
-        lat: Latitude
-        lon: Longitude
-        radius: Search radius in meters (default 500)
-    """
+def get_stops_near(lat: float, lon: float, radius: int = 500, k: int = 5):
     query = """
-        SELECT stop_id, stop_code, stop_name, stop_desc, stop_lat, stop_lon,
-               zone_id, stop_url, location_type, parent_station, 
-               stop_timezone, wheelchair_boarding,
-               ST_Distance(geom, ST_GeomFromText(%s, 4326))::numeric as distance_m
-        FROM stops
-        WHERE ST_DWithin(geom, ST_GeomFromText(%s, 4326), %s)
-        ORDER BY distance_m ASC
+        WITH input_pt AS (
+            SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS g
+        )
+        SELECT
+            s.stop_id,
+            s.stop_code,
+            s.stop_name,
+            s.stop_desc,
+            s.stop_lat,
+            s.stop_lon,
+            s.zone_id,
+            s.stop_url,
+            s.location_type,
+            s.parent_station,
+            s.stop_timezone,
+            s.wheelchair_boarding,
+            ST_Distance(s.geom::geography, input_pt.g) AS distance_m
+        FROM stops s, input_pt
+        WHERE s.geom IS NOT NULL
+          AND ST_DWithin(s.geom::geography, input_pt.g, %s)
+        ORDER BY ST_Distance(s.geom::geography, input_pt.g)
+        LIMIT %s
     """
-    point_wkt = f"POINT({lon} {lat})"
-    return execute_query(query, (point_wkt, point_wkt, radius))
+    return execute_query(query, (lon, lat, radius, k))
 
 
 def get_stops_by_zone(zone_id: str) -> List[Dict[str, Any]]:
@@ -576,3 +582,46 @@ def get_mobility_clipped_trajectories_in_window(
             min_lon, min_lat, max_lon, max_lat
         )
     )
+    
+    # ============================================================================
+# METRO-ONLY QUERIES
+# ============================================================================
+
+def get_metro_stations() -> List[Dict[str, Any]]:
+    """
+    Return distinct metro stations only.
+    Metro lines are identified by route_short_name starting with M.
+    """
+    query = """
+        SELECT DISTINCT ON (s.stop_id)
+            s.stop_id,
+            s.stop_name,
+            s.stop_lat,
+            s.stop_lon
+        FROM routes r
+        JOIN trips t ON r.route_id = t.route_id
+        JOIN stop_times st ON t.trip_id = st.trip_id
+        JOIN stops s ON st.stop_id = s.stop_id
+        WHERE r.route_short_name ILIKE 'M%%'
+        ORDER BY s.stop_id, s.stop_name
+    """
+    return execute_query(query)
+
+
+def get_metro_network_geojson() -> List[Dict[str, Any]]:
+    """
+    Return metro route geometries as GeoJSON lines.
+    Requires shape_geoms table to exist.
+    """
+    query = """
+        SELECT DISTINCT
+            r.route_id,
+            r.route_short_name,
+            r.route_long_name,
+            ST_AsGeoJSON(sg.geom) AS geojson
+        FROM routes r
+        JOIN trips t ON r.route_id = t.route_id
+        JOIN shape_geoms sg ON t.shape_id = sg.shape_id
+        WHERE r.route_short_name ILIKE 'M%%'
+    """
+    return execute_query(query)

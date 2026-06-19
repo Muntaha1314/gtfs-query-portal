@@ -33,6 +33,7 @@ class Stop(BaseModel):
     parent_station: Optional[str] = None
     stop_timezone: Optional[str] = None
     wheelchair_boarding: Optional[int] = None
+    distance_m: Optional[float] = None
 
 
 @router.get("/by-code/{stop_code}", response_model=List[Stop])
@@ -76,8 +77,8 @@ def get_all_stops_endpoint() -> List[Stop]:
 
 
 @router.get("/nearest", response_model=List[Stop])
-def get_nearest_stops(lat: float = Query(..., description="Latitude"), lon: float = Query(..., description="Longitude"), radius: int = Query(500, description="Search radius in meters")) -> List[Stop]:
-    stops_data = get_stops_near(lat, lon, radius)
+def get_nearest_stops(lat: float = Query(..., description="Latitude"), lon: float = Query(..., description="Longitude"), radius: int = Query(500, description="Search radius in meters"), k: int = Query(5, description="Number of stops to return")) -> List[Stop]:
+    stops_data = get_stops_near(lat, lon, radius, k)
     return [Stop(**stop) for stop in stops_data]
 
 

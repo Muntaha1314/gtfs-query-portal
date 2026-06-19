@@ -82,6 +82,12 @@
                 <button class="tab-btn" data-tab="advanced"><i class="fas fa-code"></i> Advanced</button>
             </div>
 
+            <div style="padding: 10px; border-bottom: 1px solid #ddd;">
+                <button class="btn btn-secondary" onclick="clearMap()" style="width: 100%;">
+                    <i class="fas fa-trash"></i> Clear Map
+                </button>
+            </div>
+
             <div class="sidebar-content">
 
                 <!-- EXPLORE TAB -->
@@ -106,9 +112,6 @@
                             <div class="helper-text">Routes should be loaded into this dropdown from the backend.</div>
                             <button class="btn btn-primary" onclick="showSelectedRouteFromDropdown()">
                                 <i class="fas fa-route"></i> Show Route + Stops
-                            </button>
-                            <button class="btn btn-secondary" onclick="populateRouteDropdown()">
-                                <i class="fas fa-sync"></i> Load Routes
                             </button>
                         </div>
 
@@ -173,42 +176,25 @@
                     <div class="section">
                         <h3>Route Calculation</h3>
 
-                        <div class="section-card">
-                            <h4>Choose Start and End Stops</h4>
+                        <label>Start Metro Station</label>
+<select id="metroStartSelect" class="input-field">
+    <option value="">Choose start station...</option>
+</select>
 
-                            <label>Start stop</label>
-                            <input type="text" id="pathStartName" placeholder="Search start stop name" class="input-field">
-                            <button class="btn btn-secondary" onclick="searchStartStop()">
-                                <i class="fas fa-search"></i> Search Start
-                            </button>
-                            <button class="btn btn-secondary" onclick="enablePickStartMode()">
-                                <i class="fas fa-map-pin"></i> Pick Start From Map
-                            </button>
-                            <div id="selectedStartBox" class="selected-box">No start stop selected.</div>
-
-                            <label style="margin-top:10px;">End stop</label>
-                            <input type="text" id="pathEndName" placeholder="Search end stop name" class="input-field">
-                            <button class="btn btn-secondary" onclick="searchEndStop()">
-                                <i class="fas fa-search"></i> Search End
-                            </button>
-                            <button class="btn btn-secondary" onclick="enablePickEndMode()">
-                                <i class="fas fa-map-pin"></i> Pick End From Map
-                            </button>
-                            <div id="selectedEndBox" class="selected-box">No end stop selected.</div>
-                        </div>
+<label>End Metro Station</label>
+<select id="metroEndSelect" class="input-field">
+    <option value="">Choose end station...</option>
+</select>
 
                         <div class="section-card">
-                            <h4>Run Algorithm</h4>
-                            <button class="btn btn-primary" onclick="runDijkstra()">
-                                <i class="fas fa-code-branch"></i> Dijkstra
-                            </button>
-                            <button class="btn btn-primary" onclick="runAStar()">
-                                <i class="fas fa-star"></i> A*
-                            </button>
-                            <button class="btn btn-secondary" onclick="comparePaths()">
-                                <i class="fas fa-exchange-alt"></i> Compare
-                            </button>
-                        </div>
+    <h4>Run Algorithm</h4>
+    <button class="btn btn-primary" onclick="syncMetroDropdownsToPathInputs(); runDijkstra();">
+        <i class="fas fa-code-branch"></i> Dijkstra
+    </button>
+    <button class="btn btn-primary" onclick="syncMetroDropdownsToPathInputs(); runAStar();">
+        <i class="fas fa-star"></i> A*
+    </button>
+</div>
                     </div>
                 </div>
 

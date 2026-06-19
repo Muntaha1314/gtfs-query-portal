@@ -18,7 +18,8 @@ from Query_table_creation import (
 
 from Query_indexes_extenctions import (
     create_gtfs_indexes,
-    enable_postgres_extensions
+    enable_postgres_extensions,
+    add_geometry_to_stops
 )
 
 POSSIBLE_ENCODINGS = [
@@ -33,6 +34,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def convert_csv_to_utf8():
+    """Convert all CSV files to UTF-8 encoding if they aren't already"""
+    data_dir = "data"
+    csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+    
+    for csv_file in csv_files:
+        file_path = os.path.join(data_dir, csv_file)
+        try:
+            # Try reading as UTF-8
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            logger.info(f"{csv_file} is already UTF-8, skipping conversion")
+        except UnicodeDecodeError:
+            # If UTF-8 fails, try CP1254 and convert to UTF-8
+            try:
+                logger.info(f"Converting {csv_file} from CP1254 to UTF-8...")
+                with open(file_path, 'r', encoding='cp1254') as f:
+                    content = f.read()
+                # Write back as UTF-8
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                logger.info(f"Successfully converted {csv_file} to UTF-8")
+            except Exception as e:
+                logger.warning(f"Could not convert {csv_file}: {e}")
+
+
 def read_csv(file_path):
     last_error = None
 
@@ -40,6 +67,11 @@ def read_csv(file_path):
         try:
             logger.info(f"Trying to read {file_path} with encoding: {encoding}")
             df = pd.read_csv(file_path, encoding=encoding)
+            
+            # Normalize all object (string) columns to ensure proper UTF-8 handling
+            for col in df.select_dtypes(include=['object']).columns:
+                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else x)
+            
             logger.info(f"Successfully read {file_path} with encoding: {encoding}")
             return df
 
@@ -55,16 +87,21 @@ def get_connection():
         port=os.getenv("DB_PORT", "5432"),
         dbname=os.getenv("DB_NAME", "gtfs_db"),
         user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD")
+        password=os.getenv("DB_PASSWORD"),
+        client_encoding='UTF8'
     )
 
 def load_csv_to_table(csv_file, table_name):
     try:
         logger.info(f"Loading {csv_file} into {table_name}...")
         
-        df = read_csv(f"data/{csv_file}")        
+        df = read_csv(f"data/{csv_file}")
+        
         conn = get_connection()
         cur = conn.cursor()
+        
+        # Ensure UTF-8 encoding for this session
+        cur.execute("SET CLIENT_ENCODING TO 'UTF8';")
         
         cur.execute(f"TRUNCATE TABLE {table_name};")
         
@@ -99,6 +136,7 @@ def other_functions():
         conn.commit()
 
         enable_postgres_extensions(conn)
+        add_geometry_to_stops(conn)
         create_gtfs_indexes(conn)
 
         logger.info(f"Ready to start!")
@@ -115,6 +153,10 @@ def main():
     logger.info("Starting GTFS data import...")
     
     try:
+        # First, ensure all CSV files are UTF-8 encoded
+        logger.info("Checking and converting CSV files to UTF-8 if needed...")
+        convert_csv_to_utf8()
+        
         load_csv_to_table("agency.csv", "agency")
         load_csv_to_table("stops.csv", "stops")
         load_csv_to_table("routes.csv", "routes")

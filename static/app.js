@@ -56,6 +56,15 @@ function clearResults() {
     document.getElementById('resultBox').innerHTML = 'Ready';
 }
 
+function clearMap() {
+    layers.stops.clearLayers();
+    layers.results.clearLayers();
+    layers.paths.clearLayers();
+    layers.network.clearLayers();
+    clearResults();
+    clearAllInteractiveModes();
+}
+
 function clearAllInteractiveModes() {
     nearestStopMode = false;
     pickStartMode = false;
@@ -116,6 +125,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     initMap();
+    loadMetroStations();
+    loadMetroNetwork();
     updateSelectedStopBoxes();
     populateRouteDropdown();
 });
@@ -462,9 +473,9 @@ async function loadAllStops() {
         layers.stops.clearLayers();
         const mcg = L.markerClusterGroup();
 
-        stops.slice(0, 100).forEach(stop => {
+        stops.forEach(stop => {
             const marker = L.circleMarker([stop.stop_lat, stop.stop_lon], {
-                radius: 4,
+                radius: 5,
                 color: '#27ae60',
                 weight: 1,
                 fillOpacity: 0.7
@@ -473,14 +484,13 @@ async function loadAllStops() {
         });
 
         layers.stops.addLayer(mcg);
-        setResult(`Loaded ${Math.min(stops.length, 100)} of ${stops.length} stops`);
+        setResult(`Loaded ${stops.length} stops`);
     } catch (err) {
         setResult(`Error: ${err.message}`);
     } finally {
         showSpinner(false);
     }
 }
-
 async function findNearestStops() {
     const lat = document.getElementById('nearLat')?.value;
     const lon = document.getElementById('nearLon')?.value;
@@ -491,7 +501,7 @@ async function findNearestStops() {
 
     showSpinner(true);
     try {
-        const res = await fetch(`${API_BASE_URL}/stops/nearest?lat=${lat}&lon=${lon}&radius=${radius}`);
+        const res = await fetch(`${API_BASE_URL}/stops/nearest?lat=${lat}&lon=${lon}&radius=${radius}&k=${k}`);
         if (!res.ok) throw new Error('No stops found');
 
         const stops = await res.json();
@@ -500,7 +510,7 @@ async function findNearestStops() {
         layers.results.clearLayers();
 
         L.circleMarker([lat, lon], {
-            radius: 5,
+            radius: 8,
             color: '#f39c12',
             weight: 2,
             fillOpacity: 0.9
@@ -516,8 +526,8 @@ async function findNearestStops() {
 
         limitedStops.forEach((stop, i) => {
             L.circleMarker([stop.stop_lat, stop.stop_lon], {
-                radius: 5,
-                color: '#e74c3c',
+                radius: 8,
+                color: '#9b59b6',
                 weight: 1,
                 fillOpacity: 0.7
             }).bindPopup(`${stop.stop_name}<br>Distance: ${Math.round(stop.distance_m)}m`).addTo(layers.results);
@@ -716,10 +726,23 @@ async function runDijkstra() {
         const res = await fetch(`${API_BASE_URL}/analysis/dijkstra?start=${start}&end=${end}`);
         if (!res.ok) throw new Error('Path not found');
 
-        const path = await res.json();
+        const data = await res.json();
 
-        drawPath(path, 'Dijkstra', '#3498db');
-        displayPathInfo(path);
+        const pathData = {
+            algorithm: 'Dijkstra',
+            path: (data.stops || []).map(stop => ({
+                stop_id: stop.stop_id,
+                stop_name: stop.stop_name,
+                lat: stop.stop_lat,
+                lon: stop.stop_lon,
+                distance_from_start: stop.agg_cost ?? stop.cost ?? 0
+            })),
+            total_distance: data.summary?.total_distance ?? data.summary?.total_cost ?? 0,
+            hops: (data.stops || []).length
+        };
+
+        drawPath(pathData, 'Dijkstra', '#3498db');
+        displayPathInfo(pathData);
     } catch (err) {
         setResult(`Error: ${err.message}`);
     } finally {
@@ -736,10 +759,23 @@ async function runAStar() {
         const res = await fetch(`${API_BASE_URL}/analysis/astar?start=${start}&end=${end}`);
         if (!res.ok) throw new Error('Path not found');
 
-        const path = await res.json();
+        const data = await res.json();
 
-        drawPath(path, 'A*', '#e74c3c');
-        displayPathInfo(path);
+        const pathData = {
+            algorithm: 'A*',
+            path: (data.stops || []).map(stop => ({
+                stop_id: stop.stop_id,
+                stop_name: stop.stop_name,
+                lat: stop.stop_lat,
+                lon: stop.stop_lon,
+                distance_from_start: stop.agg_cost ?? stop.cost ?? 0
+            })),
+            total_distance: data.summary?.total_distance ?? data.summary?.total_cost ?? 0,
+            hops: (data.stops || []).length
+        };
+
+        drawPath(pathData, 'A*', '#e74c3c');
+        displayPathInfo(pathData);
     } catch (err) {
         setResult(`Error: ${err.message}`);
     } finally {
@@ -856,37 +892,8 @@ function displayPathInfo(path) {
 }
 
 // ==================== NETWORK FUNCTIONS ====================
-async function displayFullNetwork() {
-    showSpinner(true);
-    try {
-        const res = await fetch(`${API_BASE_URL}/analysis/network`);
-        if (!res.ok) throw new Error('Network load failed');
-
-        const network = await res.json();
-
-        layers.network.clearLayers();
-
-        let html = `<h4>Full Network Visualization</h4>
-            <b>Stops:</b> ${network.stop_count}<br>
-            <b>Routes:</b> ${network.route_count}<br><hr>`;
-
-        network.stops.slice(0, 200).forEach(stop => {
-            L.circleMarker([stop.stop_lat, stop.stop_lon], {
-                radius: 3,
-                color: '#27ae60',
-                weight: 1,
-                fillOpacity: 0.6,
-                opacity: 0.6
-            }).bindPopup(stop.stop_name).addTo(layers.network);
-        });
-
-        html += `<i>Displaying ${Math.min(network.stop_count, 200)} of ${network.stop_count} stops</i>`;
-        setResult(html);
-    } catch (err) {
-        setResult(`Error: ${err.message}`);
-    } finally {
-        showSpinner(false);
-    }
+function displayFullNetwork() {
+    loadAllStops();
 }
 
 // ==================== ANALYSIS FUNCTIONS ====================
@@ -1088,4 +1095,81 @@ async function loadMobilityWindow() {
     } finally {
         showSpinner(false);
     }
+}
+
+async function loadMetroStations() {
+    showSpinner(true);
+    try {
+        const res = await fetch(`${API_BASE_URL}/analysis/metro-stations`);
+        if (!res.ok) throw new Error('Failed to load metro stations');
+
+        const stations = await res.json();
+
+        const startSelect = document.getElementById('metroStartSelect');
+        const endSelect = document.getElementById('metroEndSelect');
+
+        if (!startSelect || !endSelect) return;
+
+        startSelect.innerHTML = `<option value="">Choose start station...</option>`;
+        endSelect.innerHTML = `<option value="">Choose end station...</option>`;
+
+        stations.forEach(station => {
+            const text = `${station.stop_name} (${station.stop_id})`;
+
+            const opt1 = document.createElement('option');
+            opt1.value = station.stop_id;
+            opt1.textContent = text;
+            startSelect.appendChild(opt1);
+
+            const opt2 = document.createElement('option');
+            opt2.value = station.stop_id;
+            opt2.textContent = text;
+            endSelect.appendChild(opt2);
+        });
+
+        setResult(`Loaded ${stations.length} metro stations.`);
+    } catch (err) {
+        setResult(`Error: ${err.message}`);
+    } finally {
+        showSpinner(false);
+    }
+}
+
+async function loadMetroNetwork() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/analysis/metro-network`);
+        if (!res.ok) throw new Error('Failed to load metro network');
+
+        const data = await res.json();
+
+        layers.network.clearLayers();
+
+        L.geoJSON(data, {
+            style: {
+                color: '#7f8c8d',
+                weight: 3,
+                opacity: 0.6
+            },
+            onEachFeature: function(feature, layer) {
+                const props = feature.properties || {};
+                layer.bindPopup(`
+                    <b>${props.route_short_name || 'Metro Line'}</b><br>
+                    ${props.route_long_name || ''}
+                `);
+            }
+        }).addTo(layers.network);
+
+    } catch (err) {
+        setResult(`Error loading metro network: ${err.message}`);
+    }
+}
+function syncMetroDropdownsToPathInputs() {
+    const start = document.getElementById('metroStartSelect')?.value || '';
+    const end = document.getElementById('metroEndSelect')?.value || '';
+
+    const rawStart = document.getElementById('pathStart');
+    const rawEnd = document.getElementById('pathEnd');
+
+    if (rawStart) rawStart.value = start;
+    if (rawEnd) rawEnd.value = end;
 }
