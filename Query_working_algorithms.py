@@ -47,13 +47,17 @@ def get_dijkstra_stop_list_query(start_vertex_id, end_vertex_id):
         p.seq,
         p.node,
         sv.stop_id,
-        sv.stop_name,
+        s.stop_name,
+        s.stop_lat,
+        s.stop_lon,
         p.edge,
         p.cost,
         p.agg_cost
     FROM path p
     LEFT JOIN stop_vertices sv
         ON p.node = sv.vertex_id
+    LEFT JOIN stops s
+        ON sv.stop_id = s.stop_id
     ORDER BY p.seq;
     """
     return execute_query(query, [start_vertex_id, end_vertex_id])
@@ -133,13 +137,17 @@ def get_astar_stop_list_query(start_vertex_id, end_vertex_id):
         p.seq,
         p.node,
         sv.stop_id,
-        sv.stop_name,
+        s.stop_name,
+        s.stop_lat,
+        s.stop_lon,
         p.edge,
         p.cost,
         p.agg_cost
     FROM path p
     LEFT JOIN stop_vertices sv
         ON p.node = sv.vertex_id
+    LEFT JOIN stops s
+        ON sv.stop_id = s.stop_id
     ORDER BY p.seq;
     """
     return execute_query(query, [start_vertex_id, end_vertex_id])

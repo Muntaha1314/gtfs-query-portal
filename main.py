@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import logging
@@ -62,6 +63,15 @@ app = FastAPI(
     description="Backend of project using GTFS data, PostGIS, and pgRouting",
     lifespan=lifespan,
     json_encoders={str: lambda v: v}
+)
+
+# Add CORS middleware to allow cross-origin requests from any origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Middleware to ensure UTF-8 encoding in responses

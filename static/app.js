@@ -1,5 +1,5 @@
 // ==================== API CONFIGURATION ====================
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = window.location.origin;
 
 // ==================== MAP INITIALIZATION ====================
 let map;
@@ -397,13 +397,16 @@ function chooseStopForPath(type, stopId, stopName, lat, lon) {
 
 // ==================== STOPS FUNCTIONS ====================
 async function getStopById() {
-    const stopId = document.getElementById('stopId')?.value;
+    const stopId = document.getElementById('stopId')?.value?.trim();
     if (!stopId) return setResult('Enter a stop ID');
 
     showSpinner(true);
     try {
-        const res = await fetch(`${API_BASE_URL}/stops/${stopId}`);
-        if (!res.ok) throw new Error('Stop not found');
+        const res = await fetch(`${API_BASE_URL}/stops/${encodeURIComponent(stopId)}`);
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Stop not found');
+        }
 
         const stop = await res.json();
 
@@ -414,10 +417,10 @@ async function getStopById() {
             weight: 2,
             opacity: 1,
             fillOpacity: 0.8
-        }).bindPopup(`<b>${stop.stop_name}</b><br>ID: ${stop.stop_id}`).addTo(layers.results);
+        }).bindPopup(`<b>${stop.stop_name}</b><br>ID: ${stop.stop_id}<br>Code: ${stop.stop_code || 'N/A'}`).addTo(layers.results);
 
         map.setView([stop.stop_lat, stop.stop_lon], 14);
-        setResult(`<b>${stop.stop_name}</b><br>ID: ${stop.stop_id}<br>Lat: ${stop.stop_lat}<br>Lon: ${stop.stop_lon}`);
+        setResult(`<b>${stop.stop_name}</b><br>ID: ${stop.stop_id}<br>Code: ${stop.stop_code || 'N/A'}<br>Lat: ${stop.stop_lat}<br>Lon: ${stop.stop_lon}`);
     } catch (err) {
         setResult(`Error: ${err.message}`);
     } finally {
@@ -426,17 +429,26 @@ async function getStopById() {
 }
 
 async function getStopByCode() {
-    const code = document.getElementById('stopCode')?.value;
+    const code = document.getElementById('stopCode')?.value?.trim();
     if (!code) return setResult('Enter a stop code');
 
     showSpinner(true);
     try {
-        const res = await fetch(`${API_BASE_URL}/stops/by-code/${code}`);
-        if (!res.ok) throw new Error('Stop code not found');
+        const res = await fetch(`${API_BASE_URL}/stops/by-code/${encodeURIComponent(code)}`);
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Stop code not found');
+        }
 
         const stops = await res.json();
 
         layers.results.clearLayers();
+        
+        if (!stops || stops.length === 0) {
+            setResult('No stops found with that code');
+            return;
+        }
+
         let html = `<h4>Found ${stops.length} stop(s)</h4>`;
 
         stops.forEach(stop => {
@@ -445,16 +457,20 @@ async function getStopByCode() {
                 color: '#3498db',
                 weight: 2,
                 fillOpacity: 0.7
-            }).bindPopup(`${stop.stop_name}<br>Code: ${stop.stop_code}`).addTo(layers.results);
+            }).bindPopup(`${stop.stop_name}<br>Code: ${stop.stop_code}<br>ID: ${stop.stop_id}`).addTo(layers.results);
 
             html += `<div style="padding: 5px; border-bottom: 1px solid #ddd;">
                 <b>${stop.stop_name}</b><br>
-                Code: ${stop.stop_code} | ID: ${stop.stop_id}
+                Code: <b>${stop.stop_code}</b> | ID: ${stop.stop_id}<br>
+                Coords: ${stop.stop_lat.toFixed(4)}, ${stop.stop_lon.toFixed(4)}
             </div>`;
         });
 
         setResult(html);
-        if (stops.length > 0) map.setView([stops[0].stop_lat, stops[0].stop_lon], 13);
+        if (stops.length > 0) {
+            const bounds = L.latLngBounds(stops.map(s => [s.stop_lat, s.stop_lon]));
+            map.fitBounds(bounds);
+        }
     } catch (err) {
         setResult(`Error: ${err.message}`);
     } finally {
@@ -466,27 +482,37 @@ async function loadAllStops() {
     showSpinner(true);
     try {
         const res = await fetch(`${API_BASE_URL}/stops`);
-        if (!res.ok) throw new Error('Failed to load stops');
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to load stops');
+        }
 
         const stops = await res.json();
+        if (!stops || stops.length === 0) throw new Error('No stops found in database');
 
         layers.stops.clearLayers();
         const mcg = L.markerClusterGroup();
 
         stops.forEach(stop => {
             const marker = L.circleMarker([stop.stop_lat, stop.stop_lon], {
-                radius: 5,
-                color: '#27ae60',
+                radius: 8,
+                color: '#9b59b6',
                 weight: 1,
                 fillOpacity: 0.7
-            }).bindPopup(`${stop.stop_name}<br>ID: ${stop.stop_id}`);
+            }).bindPopup(`<b>${stop.stop_name}</b><br>ID: ${stop.stop_id}<br>Code: ${stop.stop_code || 'N/A'}`);
             mcg.addLayer(marker);
         });
 
         layers.stops.addLayer(mcg);
-        setResult(`Loaded ${stops.length} stops`);
+        setResult(` Loaded ${stops.length} stops with clustering enabled. Zoom in to see individual stops.`);
+        
+        // Fit bounds to all stops
+        if (stops.length > 0) {
+            const bounds = L.latLngBounds(stops.map(s => [s.stop_lat, s.stop_lon]));
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
     } catch (err) {
-        setResult(`Error: ${err.message}`);
+        setResult(` Error: ${err.message}`);
     } finally {
         showSpinner(false);
     }
@@ -637,19 +663,34 @@ async function useCurrentMapWindow() {
 
 // ==================== ROUTES FUNCTIONS ====================
 async function loadTopRoutes() {
-    const limit = document.getElementById('topRoutesLimit')?.value || 10;
+    const limit = document.getElementById('topRoutesLimit')?.value?.trim() || 10;
+    
+    if (isNaN(limit) || limit < 1) {
+        return setResult('Enter a valid number for route limit');
+    }
+
     showSpinner(true);
     try {
-        const res = await fetch(`${API_BASE_URL}/analysis/top-routes?limit=${limit}`);
-        if (!res.ok) throw new Error('Failed to load routes');
+        const res = await fetch(`${API_BASE_URL}/analysis/top-routes?limit=${encodeURIComponent(limit)}`);
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to load routes');
+        }
 
         const data = await res.json();
+        if (!data.top_routes || data.top_routes.length === 0) {
+            return setResult('No routes found');
+        }
 
-        let html = `<h4>Top ${limit} Routes by Trips</h4>`;
-        data.top_routes.forEach(route => {
-            html += `<div style="padding: 8px; background: #ecf0f1; margin: 5px 0; border-radius: 4px; cursor: pointer;" onclick="showRouteWithStops('${route.route_id}')">
-                <b>${route.route_short_name}</b> - ${route.route_long_name || 'N/A'}<br>
-                <small>Trips: ${route.trip_count} | Stops: ${route.stop_count}</small>
+        let html = `<h4>Top ${limit} Routes by Trips</h4>
+            <p style="color: #666; margin-bottom: 10px;">Click a route to view all stops</p>`;
+        
+        data.top_routes.forEach((route, idx) => {
+            html += `<div style="padding: 8px; background: #ecf0f1; margin: 5px 0; border-radius: 4px; cursor: pointer; transition: all 0.2s;" 
+                         onmouseover="this.style.background='#d5dbdb'" onmouseout="this.style.background='#ecf0f1'"
+                         onclick="showRouteWithStops('${String(route.route_id).replace(/'/g, "\\'")}')">
+                <b>${idx + 1}. ${route.route_short_name}</b> - ${route.route_long_name || 'N/A'}<br>
+                <small style="color: #555;">${route.stop_count} stops | ${route.trip_count} trips</small>
             </div>`;
         });
 
@@ -662,15 +703,19 @@ async function loadTopRoutes() {
 }
 
 async function showRouteWithStops(routeId = null) {
-    const id = routeId || document.getElementById('routeId')?.value;
+    const id = routeId || document.getElementById('routeId')?.value?.trim();
     if (!id) return setResult('Enter a route ID');
 
     showSpinner(true);
     try {
-        const res = await fetch(`${API_BASE_URL}/analysis/route/${id}`);
-        if (!res.ok) throw new Error('Route not found');
+        const res = await fetch(`${API_BASE_URL}/analysis/route/${encodeURIComponent(id)}`);
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Route not found');
+        }
 
         const data = await res.json();
+        if (!data.stops || data.stops.length === 0) throw new Error('No stops found for this route');
 
         layers.results.clearLayers();
 
@@ -683,23 +728,29 @@ async function showRouteWithStops(routeId = null) {
         }).addTo(layers.results);
 
         data.stops.forEach((stop, i) => {
+            let markerColor = '#27ae60';
+            if (i === 0) markerColor = '#3498db';
+            else if (i === data.stops.length - 1) markerColor = '#e74c3c';
+            
             L.circleMarker([stop.stop_lat, stop.stop_lon], {
                 radius: 6,
-                color: '#27ae60',
+                color: markerColor,
                 weight: 2,
                 fillOpacity: 0.9
-            }).bindPopup(`${i + 1}. ${stop.stop_name}`).addTo(layers.results);
+            }).bindPopup(`<b>${i + 1}. ${stop.stop_name}</b><br>ID: ${stop.stop_id}`).addTo(layers.results);
         });
 
         let html = `<h4>Route: ${data.route.route_short_name}</h4>
             <b>Name:</b> ${data.route.route_long_name || 'N/A'}<br>
             <b>Stops:</b> ${data.stop_count}<br>
             <b>Trips:</b> ${data.route.trip_count}<br>
+            <hr>
             <h5>Stops in Order:</h5>`;
 
         data.stops.forEach((stop, i) => {
             html += `<div style="padding: 4px 0; border-bottom: 1px solid #ddd;">
-                ${i + 1}. <b>${stop.stop_name}</b> (${stop.stop_id})
+                <b>${i + 1}.</b> ${stop.stop_name} <br>
+                <span style="color: #666; font-size: 0.9em;">ID: ${stop.stop_id}</span>
             </div>`;
         });
 
@@ -707,7 +758,7 @@ async function showRouteWithStops(routeId = null) {
 
         if (data.stops.length > 0) {
             const bounds = L.latLngBounds(latlngs);
-            map.fitBounds(bounds);
+            map.fitBounds(bounds, { padding: [50, 50] });
         }
     } catch (err) {
         setResult(`Error: ${err.message}`);
@@ -719,26 +770,30 @@ async function showRouteWithStops(routeId = null) {
 // ==================== PATHFINDING FUNCTIONS ====================
 async function runDijkstra() {
     const { start, end } = getPathInputValues();
-    if (!start || !end) return setResult('Choose start and end stops.');
+    if (!start || !end) return setResult('Enter start and end stop IDs');
 
     showSpinner(true);
     try {
-        const res = await fetch(`${API_BASE_URL}/analysis/dijkstra?start=${start}&end=${end}`);
-        if (!res.ok) throw new Error('Path not found');
+        const res = await fetch(`${API_BASE_URL}/analysis/dijkstra?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Path not found');
+        }
 
         const data = await res.json();
+        if (!data.path || data.path.length === 0) throw new Error('No path found between stops');
 
         const pathData = {
-            algorithm: 'Dijkstra',
-            path: (data.stops || []).map(stop => ({
+            algorithm: data.algorithm || 'Dijkstra',
+            path: (data.path || []).map(stop => ({
                 stop_id: stop.stop_id,
                 stop_name: stop.stop_name,
                 lat: stop.stop_lat,
                 lon: stop.stop_lon,
-                distance_from_start: stop.agg_cost ?? stop.cost ?? 0
+                distance_from_start: stop.distance_from_start ?? 0
             })),
-            total_distance: data.summary?.total_distance ?? data.summary?.total_cost ?? 0,
-            hops: (data.stops || []).length
+            total_distance: data.total_distance ?? 0,
+            hops: data.hops ?? (data.path || []).length
         };
 
         drawPath(pathData, 'Dijkstra', '#3498db');
@@ -752,97 +807,34 @@ async function runDijkstra() {
 
 async function runAStar() {
     const { start, end } = getPathInputValues();
-    if (!start || !end) return setResult('Choose start and end stops.');
+    if (!start || !end) return setResult('Enter start and end stop IDs');
 
     showSpinner(true);
     try {
-        const res = await fetch(`${API_BASE_URL}/analysis/astar?start=${start}&end=${end}`);
-        if (!res.ok) throw new Error('Path not found');
+        const res = await fetch(`${API_BASE_URL}/analysis/astar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Path not found');
+        }
 
         const data = await res.json();
+        if (!data.path || data.path.length === 0) throw new Error('No path found between stops');
 
         const pathData = {
-            algorithm: 'A*',
-            path: (data.stops || []).map(stop => ({
+            algorithm: data.algorithm || 'A*',
+            path: (data.path || []).map(stop => ({
                 stop_id: stop.stop_id,
                 stop_name: stop.stop_name,
                 lat: stop.stop_lat,
                 lon: stop.stop_lon,
-                distance_from_start: stop.agg_cost ?? stop.cost ?? 0
+                distance_from_start: stop.distance_from_start ?? 0
             })),
-            total_distance: data.summary?.total_distance ?? data.summary?.total_cost ?? 0,
-            hops: (data.stops || []).length
+            total_distance: data.total_distance ?? 0,
+            hops: data.hops ?? (data.path || []).length
         };
 
         drawPath(pathData, 'A*', '#e74c3c');
         displayPathInfo(pathData);
-    } catch (err) {
-        setResult(`Error: ${err.message}`);
-    } finally {
-        showSpinner(false);
-    }
-}
-
-async function comparePaths() {
-    const { start, end } = getPathInputValues();
-    if (!start || !end) return setResult('Choose start and end stops.');
-
-    showSpinner(true);
-    try {
-        const res = await fetch(`${API_BASE_URL}/analysis/compare-paths?start=${start}&end=${end}`);
-        if (!res.ok) throw new Error('Comparison failed');
-
-        const data = await res.json();
-
-        layers.paths.clearLayers();
-
-        const dijkstraLatlngs = data.dijkstra.path.map(p => [p.lat, p.lon]);
-        const astarLatlngs = data.astar.path.map(p => [p.lat, p.lon]);
-
-        L.polyline(dijkstraLatlngs, {
-            color: '#3498db',
-            weight: 3,
-            opacity: 0.6,
-            dashArray: '5,5'
-        }).addTo(layers.paths);
-
-        L.polyline(astarLatlngs, {
-            color: '#e74c3c',
-            weight: 3,
-            opacity: 0.6
-        }).addTo(layers.paths);
-
-        dijkstraLatlngs.forEach(p => {
-            L.circleMarker(p, { radius: 4, color: '#3498db', weight: 1 }).addTo(layers.paths);
-        });
-
-        astarLatlngs.forEach(p => {
-            L.circleMarker(p, { radius: 4, color: '#e74c3c', weight: 1 }).addTo(layers.paths);
-        });
-
-        const comparison = data.comparison;
-        let html = `<h4>Algorithm Comparison</h4>
-            <div style="background: #ecf0f1; padding: 10px; border-radius: 4px; margin-bottom: 10px;">
-            <b>Dijkstra:</b> ${Math.round(comparison.dijkstra_distance)}m, ${comparison.dijkstra_hops} hops<br>
-            <b>A*:</b> ${Math.round(comparison.astar_distance)}m, ${comparison.astar_hops} hops<br>
-            <b>Same Path:</b> ${comparison.same_path ? 'Yes' : 'No'}
-            </div>
-            <h5>Dijkstra Path:</h5>`;
-
-        data.dijkstra.path.forEach(p => {
-            html += `<div style="padding: 3px; font-size: 0.9em;"><b>${p.stop_name}</b> (${Math.round(p.distance_from_start)}m)</div>`;
-        });
-
-        html += `<hr><h5>A* Path:</h5>`;
-
-        data.astar.path.forEach(p => {
-            html += `<div style="padding: 3px; font-size: 0.9em;"><b>${p.stop_name}</b> (${Math.round(p.distance_from_start)}m)</div>`;
-        });
-
-        setResult(html);
-
-        const bounds = L.latLngBounds(dijkstraLatlngs.concat(astarLatlngs));
-        if (bounds.isValid()) map.fitBounds(bounds);
     } catch (err) {
         setResult(`Error: ${err.message}`);
     } finally {
@@ -956,6 +948,19 @@ function loadMobilityCurrentWindow() {
     loadMobilityWindow();
 }
 
+// Color palette for different vehicles
+const vehicleColors = {
+    'V101': '#e74c3c',   // Red
+    'V102': '#3498db',   // Blue
+    'V103': '#2ecc71',   // Green
+    'V104': '#f39c12',   // Orange
+    'V105': '#9b59b6'    // Purple
+};
+
+function getVehicleColor(vehicleId) {
+    return vehicleColors[vehicleId] || '#95a5a6'; // Default gray
+}
+
 async function loadMobilityTrajectories() {
     showSpinner(true);
     try {
@@ -965,31 +970,54 @@ async function loadMobilityTrajectories() {
         if (!res.ok) throw new Error('Failed to load trajectories');
 
         const data = await res.json();
+        const vehicleStats = {};
 
         const geoLayer = L.geoJSON(data, {
-            style: {
-                color: '#8e44ad',
-                weight: 4,
-                opacity: 0.8
+            style: function(feature) {
+                const vehicleId = feature.properties?.vehicle_id || 'UNKNOWN';
+                if (!vehicleStats[vehicleId]) {
+                    vehicleStats[vehicleId] = { route: feature.properties?.route_id || 'N/A' };
+                }
+                return {
+                    color: getVehicleColor(vehicleId),
+                    weight: 5,
+                    opacity: 0.85,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                };
             },
             onEachFeature: function(feature, layer) {
                 const props = feature.properties || {};
-                layer.bindPopup(`
-                    <b>Vehicle:</b> ${props.vehicle_id || 'N/A'}<br>
-                    <b>Route:</b> ${props.route_id || 'N/A'}
-                `);
+                const popup = `
+                    <div style="font-family: monospace; font-size: 12px;">
+                        <b style="color: ${getVehicleColor(props.vehicle_id)}">▓ ${props.vehicle_id}</b><br>
+                        <i>Route:</i> <b>${props.route_id || 'N/A'}</b><br>
+                        <i>Path points:</i> ${feature.geometry?.coordinates?.length || '?'}
+                    </div>
+                `;
+                layer.bindPopup(popup);
             }
         }).addTo(layers.results);
 
+        // Create legend
+        let legendHTML = '<h4 style="margin: 0 0 8px 0;">Vehicle Trajectories</h4>';
+        Object.entries(vehicleStats).forEach(([vid, info]) => {
+            legendHTML += `<div style="margin: 4px 0;"><span style="color: ${getVehicleColor(vid)}; font-weight: bold;">▓▓▓</span> ${vid} (${info.route})</div>`;
+        });
+
         if (data.features && data.features.length > 0) {
             const bounds = geoLayer.getBounds();
-            if (bounds.isValid()) map.fitBounds(bounds);
+            if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
         }
 
-        setResult(`<h4>MobilityDB Trajectories</h4>
-            Loaded ${data.features ? data.features.length : 0} trajectory feature(s).`);
+        setResult(`<h4>Full Vehicle Trajectories</h4>
+            <div style="font-size: 0.9rem;">
+                <p>Showing complete paths of <b>${Object.keys(vehicleStats).length} vehicle(s)</b></p>
+                ${legendHTML}
+                <p style="font-size: 0.85rem; color: #666; margin-top: 8px;"><i>Click paths for details</i></p>
+            </div>`);
     } catch (err) {
-        setResult(`Error: ${err.message}`);
+        setResult(`<span style="color: #e74c3c;">Error: ${err.message}</span>`);
     } finally {
         showSpinner(false);
     }
@@ -997,7 +1025,7 @@ async function loadMobilityTrajectories() {
 
 async function loadMobilityAtTime() {
     const timestamp = document.getElementById('mobilityTime')?.value;
-    if (!timestamp) return setResult('Enter a timestamp');
+    if (!timestamp) return setResult('Enter a timestamp (e.g., 2026-05-25 08:05:00+03)');
 
     showSpinner(true);
     try {
@@ -1010,45 +1038,61 @@ async function loadMobilityAtTime() {
 
         const geoLayer = L.geoJSON(data, {
             pointToLayer: function(feature, latlng) {
+                const vehicleId = feature.properties?.vehicle_id || 'UNKNOWN';
                 return L.circleMarker(latlng, {
-                    radius: 7,
-                    color: '#e74c3c',
-                    weight: 2,
-                    fillOpacity: 0.9
+                    radius: 12,
+                    color: getVehicleColor(vehicleId),
+                    weight: 3,
+                    fillOpacity: 0.9,
+                    fillColor: getVehicleColor(vehicleId)
                 });
             },
             onEachFeature: function(feature, layer) {
                 const props = feature.properties || {};
-                layer.bindPopup(`
-                    <b>Vehicle:</b> ${props.vehicle_id || 'N/A'}<br>
-                    <b>Route:</b> ${props.route_id || 'N/A'}
-                `);
+                const popup = `
+                    <div style="font-family: monospace; font-size: 12px;">
+                        <b style="color: ${getVehicleColor(props.vehicle_id)}">● ${props.vehicle_id}</b><br>
+                        <i>Route:</i> <b>${props.route_id || 'N/A'}</b><br>
+                        <i>Time:</i> ${timestamp.split('+')[0]}
+                    </div>
+                `;
+                layer.bindPopup(popup);
+                layer.openPopup();
             }
         }).addTo(layers.results);
 
         if (data.features && data.features.length > 0) {
             const bounds = geoLayer.getBounds();
-            if (bounds.isValid()) map.fitBounds(bounds);
+            if (bounds.isValid()) map.fitBounds(bounds, { padding: [80, 80] });
         }
 
-        setResult(`<h4>MobilityDB Positions</h4>
-            Timestamp: ${timestamp}<br>
-            Loaded ${data.features ? data.features.length : 0} position(s).`);
+        setResult(`<h4> Vehicle Positions at Time</h4>
+            <div style="font-size: 0.9rem;">
+                <p><b>Timestamp:</b> ${timestamp}</p>
+                <p><b>Vehicles found:</b> ${data.features ? data.features.length : 0}</p>
+                <div style="margin-top: 8px; padding: 8px; background: #f0f0f0; border-left: 3px solid #3498db;">
+                    <p style="margin: 0; font-size: 0.85rem; color: #666;">Each circle shows where a vehicle was at this exact moment. Click circles for details.</p>
+                </div>
+            </div>`);
     } catch (err) {
-        setResult(`Error: ${err.message}`);
+        setResult(`<span style="color: #e74c3c;">Error: ${err.message}</span>`);
     } finally {
         showSpinner(false);
     }
 }
 
 async function loadMobilityWindow() {
-    const minLon = document.getElementById('minLon')?.value;
-    const minLat = document.getElementById('minLat')?.value;
-    const maxLon = document.getElementById('maxLon')?.value;
-    const maxLat = document.getElementById('maxLat')?.value;
+    const minLon = parseFloat(document.getElementById('minLon')?.value);
+    const minLat = parseFloat(document.getElementById('minLat')?.value);
+    const maxLon = parseFloat(document.getElementById('maxLon')?.value);
+    const maxLat = parseFloat(document.getElementById('maxLat')?.value);
 
-    if (!minLon || !minLat || !maxLon || !maxLat) {
-        return setResult('Enter all bounding box values');
+    if (isNaN(minLon) || isNaN(minLat) || isNaN(maxLon) || isNaN(maxLat)) {
+        return setResult(' Enter valid numeric bounding box values or click "Use Current Map Window"');
+    }
+
+    if (minLon >= maxLon || minLat >= maxLat) {
+        return setResult(' Invalid bounds: min must be less than max');
     }
 
     showSpinner(true);
@@ -1058,40 +1102,76 @@ async function loadMobilityWindow() {
         const res = await fetch(
             `${API_BASE_URL}/mobility/in-window?min_lon=${minLon}&min_lat=${minLat}&max_lon=${maxLon}&max_lat=${maxLat}`
         );
-        if (!res.ok) throw new Error('Failed to load trajectories in window');
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to load trajectories');
+        }
 
         const data = await res.json();
+        const vehicleCount = data.features ? data.features.length : 0;
 
-        L.rectangle([[parseFloat(minLat), parseFloat(minLon)], [parseFloat(maxLat), parseFloat(maxLon)]], {
-            color: '#3498db',
-            weight: 2,
-            fill: false
+        // Draw selection window
+        const windowBounds = [[parseFloat(minLat), parseFloat(minLon)], [parseFloat(maxLat), parseFloat(maxLon)]];
+        L.rectangle(windowBounds, {
+            color: '#2c3e50',
+            weight: 3,
+            fill: true,
+            fillColor: '#3498db',
+            fillOpacity: 0.15,
+            dashArray: '5, 5'
         }).addTo(layers.results);
 
+        // Draw trajectories with colors by vehicle
+        const vehicleStats = {};
         const geoLayer = L.geoJSON(data, {
-            style: {
-                color: '#16a085',
-                weight: 4,
-                opacity: 0.8
+            style: function(feature) {
+                const vehicleId = feature.properties?.vehicle_id || 'UNKNOWN';
+                               if (!vehicleStats[vehicleId]) {
+                    vehicleStats[vehicleId] = { route: feature.properties?.route_id || 'N/A' };
+                }
+                return {
+                    color: getVehicleColor(vehicleId),
+                    weight: 5,
+                    opacity: 0.85,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                };
             },
             onEachFeature: function(feature, layer) {
                 const props = feature.properties || {};
-                layer.bindPopup(`
-                    <b>Vehicle:</b> ${props.vehicle_id || 'N/A'}<br>
-                    <b>Route:</b> ${props.route_id || 'N/A'}
-                `);
+                const popup = `
+                    <div style="font-family: monospace; font-size: 12px;">
+                        <b style="color: ${getVehicleColor(props.vehicle_id)}">${props.vehicle_id}</b><br>
+                        <i>Route:</i> <b>${props.route_id || 'N/A'}</b><br>
+                        <i>In window:</i> Yes
+                    </div>
+                `;
+                layer.bindPopup(popup);
             }
         }).addTo(layers.results);
 
         if (data.features && data.features.length > 0) {
             const bounds = geoLayer.getBounds();
-            if (bounds.isValid()) map.fitBounds(bounds);
+            if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
         }
 
-        setResult(`<h4>MobilityDB Spatial Window</h4>
-            Loaded ${data.features ? data.features.length : 0} trajectory feature(s).`);
+        let vehicleLegend = '';
+        Object.entries(vehicleStats).forEach(([vid, info]) => {
+            vehicleLegend += `<div style="margin: 4px 0;"><span style="color: ${getVehicleColor(vid)}; font-weight: bold;">███</span> ${vid} (${info.route})</div>`;
+        });
+
+        const area = (parseFloat(maxLon) - parseFloat(minLon)) * (parseFloat(maxLat) - parseFloat(minLat));
+
+        setResult(`<h4>Spatial Window Query</h4>
+            <div style="font-size: 0.9rem;">
+                <p><b>Bounds:</b> Lon [${minLon.toFixed(3)} → ${maxLon.toFixed(3)}], Lat [${minLat.toFixed(3)} → ${maxLat.toFixed(3)}]</p>
+                <p><b>Area:</b> ~${area.toFixed(6)}° (shaded on map)</p>
+                <p><b>Trajectories Found:</b> <span style="font-weight: bold; font-size: 1.1em; color: #2980b9;">${vehicleCount}</span></p>
+                ${vehicleLegend ? `<div style="margin-top: 8px; padding: 8px; background: #ecf0f1; border-radius: 4px;">${vehicleLegend}</div>` : '<p style="color: #666;">No vehicles in this window.</p>'}
+                <p style="font-size: 0.85rem; color: #666; margin-top: 8px;"><i>Select an area to view vehicle trajectories passing through it.</i></p>
+            </div>`);
     } catch (err) {
-        setResult(`Error: ${err.message}`);
+        setResult(`<span style="color: #e74c3c;"> Error: ${err.message}</span>`);
     } finally {
         showSpinner(false);
     }

@@ -5,24 +5,13 @@ done!
 
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict
-from database_Creation import execute_query
+from database_Creation import execute_query, connect_Database
 import logging
 import json
-from Query_tables import get_metro_stations, get_metro_network_geojson
-
-
-from database_Creation import execute_query, connect_Database
-
-
+from Query_tables import get_metro_stations, get_metro_network_geojson, get_metro_shortest_path, get_metro_astar_path
 from Query_working_algorithms import (
     get_tsp_selected_stops_query,
     get_tsp_order_query,
-    get_dijkstra_stop_list_query,
-    get_dijkstra_geometry_query,
-    get_dijkstra_summary_query,
-    get_astar_stop_list_query,
-    get_astar_geometry_query,
-    get_astar_summary_query,
     get_full_network_query
 )
 
@@ -46,57 +35,73 @@ def full_network():
     return network
 
 @router.get("/dijkstra")
-def get_dijkstra_route(start: int, end: int):
-    stops = get_dijkstra_stop_list_query(start, end)
+def get_dijkstra_route(start: str = Query(..., description="Start metro stop ID"), end: str = Query(..., description="End metro stop ID")):
+    try:
+        # Get metro-only shortest path
+        stops = get_metro_shortest_path(start, end)
 
-    if not stops:
-        raise HTTPException(status_code=404, detail="No path found")
+        if not stops:
+            raise HTTPException(status_code=404, detail="No metro path found between stops")
 
-    summary = get_dijkstra_summary_query(start, end)
+        # Build response with path data
+        path = []
+        total_cost = 0
+        for stop in stops:
+            path.append({
+                "stop_id": stop["stop_id"],
+                "stop_name": stop["stop_name"],
+                "stop_lat": stop["stop_lat"],
+                "stop_lon": stop["stop_lon"],
+                "distance_from_start": stop.get("agg_cost", 0)
+            })
+            total_cost = stop.get("agg_cost", 0)
 
-    path = []
-    for stop in stops:
-        path.append({
-            "stop_id": stop["stop_id"],
-            "stop_name": stop["stop_name"],
-            "lat": stop["stop_lat"],
-            "lon": stop["stop_lon"],
-            "distance_from_start": stop.get("agg_cost", 0)
-        })
-
-    return {
-        "algorithm": "Dijkstra",
-        "path": path,
-        "total_distance": summary.get("total_distance", 0) if isinstance(summary, dict) else 0,
-        "hops": len(path)
-    }
+        return {
+            "algorithm": "Dijkstra (Metro)",
+            "path": path,
+            "total_distance": total_cost,
+            "hops": len(path)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in Dijkstra metro route calculation")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/astar")
-def get_astar_route(start: int, end: int):
-    stops = get_astar_stop_list_query(start, end)
+def get_astar_route(start: str = Query(..., description="Start metro stop ID"), end: str = Query(..., description="End metro stop ID")):
+    try:
+        # Get metro-only A* path
+        stops = get_metro_astar_path(start, end)
 
-    if not stops:
-        raise HTTPException(status_code=404, detail="No path found")
+        if not stops:
+            raise HTTPException(status_code=404, detail="No metro path found between stops")
 
-    summary = get_astar_summary_query(start, end)
+        # Build response with path data
+        path = []
+        total_cost = 0
+        for stop in stops:
+            path.append({
+                "stop_id": stop["stop_id"],
+                "stop_name": stop["stop_name"],
+                "stop_lat": stop["stop_lat"],
+                "stop_lon": stop["stop_lon"],
+                "distance_from_start": stop.get("agg_cost", 0)
+            })
+            total_cost = stop.get("agg_cost", 0)
 
-    path = []
-    for stop in stops:
-        path.append({
-            "stop_id": stop["stop_id"],
-            "stop_name": stop["stop_name"],
-            "lat": stop["stop_lat"],
-            "lon": stop["stop_lon"],
-            "distance_from_start": stop.get("agg_cost", 0)
-        })
-
-    return {
-        "algorithm": "A*",
-        "path": path,
-        "total_distance": summary.get("total_distance", 0) if isinstance(summary, dict) else 0,
-        "hops": len(path)
-    }
+        return {
+            "algorithm": "A* (Metro)",
+            "path": path,
+            "total_distance": total_cost,
+            "hops": len(path)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in A* metro route calculation")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/tsp")
 def get_tsp_route(start_id: int, stop_ids: list[int] = Query(...)):

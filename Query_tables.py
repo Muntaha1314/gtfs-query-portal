@@ -3,38 +3,8 @@ from database_Creation import execute_query, update_insert_delete_query
 
 
 # ============================================================================
-# HELPER FUNCTIONS
+# ROUTES TABLE QUERIES
 # ============================================================================
-
-def get_vertex_id_by_stop_id(stop_id: str) -> Optional[int]:
-    """
-    Convert a stop ID to its vertex ID.
-    
-    Args:
-        stop_id: The stop ID (string)
-    
-    Returns:
-        Vertex ID (integer) or None if not found
-    """
-    query = "SELECT vertex_id FROM stop_vertices WHERE stop_id = %s"
-    results = execute_query(query, (stop_id,))
-    return results[0]['vertex_id'] if results else None
-
-
-def get_stop_id_by_vertex_id(vertex_id: int) -> Optional[str]:
-    """
-    Convert a vertex ID to its stop ID.
-    
-    Args:
-        vertex_id: The vertex ID (integer)
-    
-    Returns:
-        Stop ID (string) or None if not found
-    """
-    query = "SELECT stop_id FROM stop_vertices WHERE vertex_id = %s"
-    results = execute_query(query, (vertex_id,))
-    return results[0]['stop_id'] if results else None
-
 
 def get_all_routes(limit: int = 100) -> List[Dict[str, Any]]:
     query = """
@@ -625,3 +595,122 @@ def get_metro_network_geojson() -> List[Dict[str, Any]]:
         WHERE r.route_short_name ILIKE 'M%%'
     """
     return execute_query(query)
+
+
+# ============================================================================
+# METRO-ONLY ROUTING FUNCTIONS
+# ============================================================================
+
+def get_metro_shortest_path(start_stop_id: str, end_stop_id: str) -> List[Dict[str, Any]]:
+    """
+    Find shortest path between two metro stops using only metro routes.
+    Uses pgRouting Dijkstra on metro-only transit edges.
+    
+    Args:
+        start_stop_id: Starting metro stop ID
+        end_stop_id: Ending metro stop ID
+    
+    Returns:
+        List of metro stops along the shortest path with coordinates
+    """
+    query = """
+    WITH metro_stops AS (
+        SELECT DISTINCT sv.vertex_id
+        FROM stop_vertices sv
+        JOIN stop_times st ON sv.stop_id = st.stop_id
+        JOIN trips t ON st.trip_id = t.trip_id
+        JOIN routes r ON t.route_id = r.route_id
+        WHERE r.route_short_name ILIKE 'M%%'
+    ),
+    path AS (
+        SELECT *
+        FROM pgr_dijkstra(
+            'WITH metro_stops AS (
+                SELECT DISTINCT sv.vertex_id
+                FROM stop_vertices sv
+                JOIN stop_times st ON sv.stop_id = st.stop_id
+                JOIN trips t ON st.trip_id = t.trip_id
+                JOIN routes r ON t.route_id = r.route_id
+                WHERE r.route_short_name ILIKE ''M%%''
+            )
+            SELECT te.id, te.source, te.target, te.cost
+            FROM transit_edges te
+            WHERE te.source IN (SELECT vertex_id FROM metro_stops)
+              AND te.target IN (SELECT vertex_id FROM metro_stops)',
+            (SELECT sv.vertex_id FROM stop_vertices sv WHERE sv.stop_id = %s LIMIT 1),
+            (SELECT sv.vertex_id FROM stop_vertices sv WHERE sv.stop_id = %s LIMIT 1),
+            directed := true
+        )
+    )
+    SELECT
+        p.seq,
+        sv.stop_id,
+        s.stop_name,
+        s.stop_lat,
+        s.stop_lon,
+        p.cost,
+        p.agg_cost
+    FROM path p
+    LEFT JOIN stop_vertices sv ON p.node = sv.vertex_id
+    LEFT JOIN stops s ON sv.stop_id = s.stop_id
+    ORDER BY p.seq;
+    """
+    results = execute_query(query, (start_stop_id, end_stop_id))
+    return results if results else []
+
+
+def get_metro_astar_path(start_stop_id: str, end_stop_id: str) -> List[Dict[str, Any]]:
+    """
+    Find shortest path between two metro stops using A* algorithm on metro-only network.
+    
+    Args:
+        start_stop_id: Starting metro stop ID
+        end_stop_id: Ending metro stop ID
+    
+    Returns:
+        List of metro stops along the shortest path with coordinates
+    """
+    query = """
+    WITH metro_stops AS (
+        SELECT DISTINCT sv.vertex_id
+        FROM stop_vertices sv
+        JOIN stop_times st ON sv.stop_id = st.stop_id
+        JOIN trips t ON st.trip_id = t.trip_id
+        JOIN routes r ON t.route_id = r.route_id
+        WHERE r.route_short_name ILIKE 'M%%'
+    ),
+    path AS (
+        SELECT *
+        FROM pgr_astar(
+            'WITH metro_stops AS (
+                SELECT DISTINCT sv.vertex_id
+                FROM stop_vertices sv
+                JOIN stop_times st ON sv.stop_id = st.stop_id
+                JOIN trips t ON st.trip_id = t.trip_id
+                JOIN routes r ON t.route_id = r.route_id
+                WHERE r.route_short_name ILIKE ''M%%''
+            )
+            SELECT te.id, te.source, te.target, te.cost, te.x1, te.y1, te.x2, te.y2
+            FROM transit_edges te
+            WHERE te.source IN (SELECT vertex_id FROM metro_stops)
+              AND te.target IN (SELECT vertex_id FROM metro_stops)',
+            (SELECT sv.vertex_id FROM stop_vertices sv WHERE sv.stop_id = %s LIMIT 1),
+            (SELECT sv.vertex_id FROM stop_vertices sv WHERE sv.stop_id = %s LIMIT 1),
+            directed := true
+        )
+    )
+    SELECT
+        p.seq,
+        sv.stop_id,
+        s.stop_name,
+        s.stop_lat,
+        s.stop_lon,
+        p.cost,
+        p.agg_cost
+    FROM path p
+    LEFT JOIN stop_vertices sv ON p.node = sv.vertex_id
+    LEFT JOIN stops s ON sv.stop_id = s.stop_id
+    ORDER BY p.seq;
+    """
+    results = execute_query(query, (start_stop_id, end_stop_id))
+    return results if results else []
