@@ -104,7 +104,6 @@ The main GTFS files used in this project include:
 | `trips.txt`          | Trips belonging to routes and services      |
 | `stop_times.txt`     | Stop arrival and departure times            |
 | `calendar.txt`       | Weekly service schedules                    |
-| `calendar_dates.txt` | Service exceptions for specific dates       |
 | `shapes.txt`         | Geographic paths followed by vehicles       |
 
 The files are connected through identifiers such as:
