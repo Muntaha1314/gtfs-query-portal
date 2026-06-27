@@ -1,181 +1,136 @@
-# GTFS Query Portal — Setup and Run Guide
+# GTFS Public Transport Explorer
 
-This project is a **GTFS-based public transportation query portal** built with:
-- **FastAPI** for the backend
-- **PostgreSQL** as the database
-- **PostGIS** for spatial queries
-- **pgRouting** for route calculation
-- **MobilityDB** for trajectory and spatio-temporal queries
-- **Leaflet + OpenStreetMap** for the frontend map
+A full-stack public transportation data exploration and analysis system built using **GTFS**, **PostgreSQL**, **PostGIS**, **MobilityDB**, **pgRouting**, **FastAPI**, and **Leaflet**.
+
+The project imports public transportation data in GTFS format, transforms it into spatial and mobility data, and provides an interactive web interface for exploring stops, routes, trips, service schedules, spatial relationships, and routing results.
+
+## Project Overview
+
+The **GTFS Public Transport Explorer** is a web-based system for working with public transportation data.
+
+The application performs the following main tasks:
+
+* Imports GTFS files into PostgreSQL.
+* Stores stop coordinates using PostGIS geometries.
+* Processes trips, routes, stops, shapes, and service dates.
+* Transforms ordinary transportation data into mobility data.
+* Executes spatial SQL queries.
+* Calculates routes using pgRouting.
+* Provides transportation statistics and network summaries.
+* Displays query results on an interactive Leaflet map.
+* Connects the frontend to the database through a FastAPI REST API.
+
+The project uses public transportation GTFS data published by the Istanbul Metropolitan Municipality.
 
 
-## 1. What is included
+## Main Features
 
-The project contains:
-- GTFS CSV files inside the `data/` folder
-- SQL helpers for creating tables, indexes, and extensions
-- FastAPI backend routers
-- frontend files in:
-  - `template/index.html`
-  - `static/app.js`
-  - `static/style.css`
+The application provides several groups of functions:
 
-When the backend starts, it attempts to:
-1. connect to PostgreSQL
-2. load the GTFS CSV data into the database
-3. expose API endpoints
-4. open the web interface at `/` or `/map`
+### GTFS Exploration
 
----
-
-## 2. Prerequisites
-
-Install these first:
-
-### Software
-- **Python 3.10**
-- **PostgreSQL**
-- **PostGIS** extension
-- **pgRouting** extension
-- **MobilityDB** extension
-
-### Tested Python packages
-The project currently uses:
-- `fastapi==0.104.1`
-- `uvicorn==0.24.0`
-- `psycopg2-binary==2.9.9`
-- `pydantic==2.5.0`
-- `python-dotenv==1.0.0`
-- `pandas` *(required by `load_data.py`)*
-
-> Note: `pandas` is required even though it is not listed in the current `requirements.txt`, because `load_data.py` imports it.
+* Display public transport stops.
+* Display available routes.
+* Retrieve trips belonging to a route.
+* Show the stops belonging to a selected route.
+* View route and trip information in tables.
+* Find stops near a selected point.
+* Find the nearest stop to a location.
+* Calculate distances between stops.
+* Search for stops inside a specified area.
+* Display spatial query results on the map.
+* Calculate paths between selected stops.
+* Perform shortest-path calculations using pgRouting.
+* Compare different routing algorithms.
+* Display the calculated path as a line on the map.
+* Count stop visits and unique routes.
+* Analyze service activity on a selected date.
+* Transform trips into temporal or mobility representations.
+* Explore the movement of public transportation vehicles.
 
 ---
 
-## 3. Project folder structure
+## Technologies Used
 
-Important folders/files:
+### Backend
+
+* Python
+* FastAPI
+* Uvicorn
+* Psycopg2
+* Pandas
+* Pydantic
+* Python-dotenv
+
+### Database
+
+* PostgreSQL
+* PostGIS
+* MobilityDB
+* pgRouting
+* SQL
+
+### Frontend
+
+* HTML
+* CSS
+* JavaScript
+* Leaflet
+* Fetch API
+
+### Development Tools
+
+* Git
+* GitHub
+* pgAdmin
+* Visual Studio Code
+* Swagger UI
+
+---
+
+## GTFS Data
+
+GTFS stands for **General Transit Feed Specification**.
+
+It is a standard format used by transportation organizations to publish public transport schedules and geographic information.
+
+The main GTFS files used in this project include:
+
+| File                 | Description                                 |
+| -------------------- | ------------------------------------------- |
+| `agency.txt`         | Information about the transportation agency |
+| `stops.txt`          | Stop names, IDs, latitudes, and longitudes  |
+| `routes.txt`         | Public transportation route information     |
+| `trips.txt`          | Trips belonging to routes and services      |
+| `stop_times.txt`     | Stop arrival and departure times            |
+| `calendar.txt`       | Weekly service schedules                    |
+| `calendar_dates.txt` | Service exceptions for specific dates       |
+| `shapes.txt`         | Geographic paths followed by vehicles       |
+
+The files are connected through identifiers such as:
+
+* `stop_id`
+* `route_id`
+* `trip_id`
+* `service_id`
+* `shape_id`
+
+---
+
+## Data Sources and References
+
+### Istanbul Metropolitan Municipality GTFS Dataset
+
+Istanbul Metropolitan Municipality Open Data Portal:
 
 ```text
-project_root/
-│
-├── data/                  # GTFS CSV files
-├── sql/                   # SQL scripts
-├── static/                # frontend JS/CSS
-├── template/              # frontend HTML
-├── main.py                # FastAPI entry point
-├── load_data.py           # imports CSV data into PostgreSQL
-├── database_Creation.py   # DB connection helpers
-├── requirements.txt       # Python dependencies
-└── .env                   # local configuration
+https://data.ibb.gov.tr/en/dataset/public-transport-gtfs-data
 ```
 
----
+### MobilityDB Workshop
 
-## 4. Database preparation
-
-### 4.1 Create a PostgreSQL database
-Create a new database, for example:
-
-```sql
-CREATE DATABASE gtfs_portals;
-```
-
-### 4.2 Enable required extensions
-Connect to that database and run:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS pgrouting;
-CREATE EXTENSION IF NOT EXISTS mobilitydb;
-```
-
-### 4.3 Create the GTFS tables
-Run the provided SQL scripts in this order:
-
-1. `sql/extensions.sql`
-2. `sql/create_tables.sql`
-3. `sql/add_geomtery.sql`
-4. `sql/indexes.sql`
-
-If preferred, these can also be run manually from pgAdmin.
-
----
-
-## 5. Environment configuration
-
-Create a `.env` file in the project root.
-
-Use this format:
-
-```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=gtfs_portals
-DB_USER=postgres
-DB_PASSWORD=your_password_here
-
-API_PORT=8000
-API_HOST=127.0.0.1
-```
-
-
-## 7. Running the project
-
-From the project root, run:
-
-```bash
-uvicorn main:app --reload
-```
-
-If startup succeeds, the terminal should show that:
-- the database connection is successful
-- GTFS data is being loaded
-- the FastAPI server is running
-
----
-
-## 8. Open the application
-
-After the server starts, open one of these URLs in the browser:
-
-### Main interface
-```text
-http://127.0.0.1:8000/
-```
-
-or
+Transforming GTFS Data for MobilityDB:
 
 ```text
-http://127.0.0.1:8000/map
+https://docs.mobilitydb.com/MobilityDB-workshop/master/ch04s02.html
 ```
-
-### Swagger API docs
-```text
-http://127.0.0.1:8000/docs
-```
-
----
-
-## 9. What should work
-
-The project should expose these main backend groups:
-- `/stops`
-- `/routing`
-- `/analysis`
-- `/mobility`
-
-The frontend should allow testing of:
-- stop queries
-- route display
-- shortest path (Dijkstra / A*)
-- spatial window query
-- nearest-neighbor style queries
-- MobilityDB trajectory visualization
-
----
-
-# 10. Photo of the project
-
-<img width="1919" height="950" alt="WINDOW_Q" src="https://github.com/user-attachments/assets/6bb07a66-2dd0-49a7-8cef-2290c5f2d8e3" />
-
