@@ -1,7 +1,3 @@
-"""
-Load GTFS data from CSV files into PostgreSQL database
-DONE!
-"""
 
 import os
 import psycopg2
